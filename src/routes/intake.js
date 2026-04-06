@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const { sendIntakeEmails } = require('../email');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
@@ -187,12 +188,20 @@ router.post('/submit', submitLimiter, async (req, res) => {
     );
 
     // Log for admin awareness
+    const ref = `INT-${rows[0].id.toString().padStart(5, '0')}`;
+
     await pool.query(
       `INSERT INTO activity_log (type, message) VALUES ($1,$2)`,
-      ['intake_submitted', `New intake from ${name} (${email}) — ${svc}`]
+      ['intake_submitted', `New intake from ${name} (${email}) — ${svc} [${ref}]`]
     );
 
-    res.json({ ok: true, ref: `INT-${rows[0].id.toString().padStart(5, '0')}` });
+    // Fire confirmation emails — non-blocking, never fails the submission
+    const submissionData = { customer_name: name, customer_email: email, customer_phone: phone,
+      address: addr, service_type: svc, preferred_date: date, preferred_time: time,
+      frequency: freq, notes: note };
+    sendIntakeEmails(submissionData, ref).catch(err => console.error('Email error:', err));
+
+    res.json({ ok: true, ref });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });

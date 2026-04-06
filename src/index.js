@@ -89,26 +89,30 @@ async function start() {
 
 async function emailAdminNewPassword(plain) {
   const adminEmail = process.env.ADMIN_EMAIL || 'ptcollins@collinstechflorida.com';
-  if (!process.env.SMTP_HOST) {
+  if (!process.env.RESEND_API_KEY) {
     console.log(`[Email stub] Intake password for week: ${plain} → ${adminEmail}`);
     return;
   }
   try {
-    const nodemailer = require('nodemailer');
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    });
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || 'noreply@savvyscheduler.app',
+    const { Resend } = require('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const FROM = process.env.EMAIL_FROM || 'SavvyScheduler <onboarding@resend.dev>';
+    await resend.emails.send({
+      from: FROM,
       to: adminEmail,
       subject: 'SavvyScheduler — New Weekly Intake Password',
-      text: `Your intake form password for this week:\n\n${plain}\n\nThis password expires in 7 days and was automatically rotated.\n\nDo not share this email.`,
-      html: `<p>Your intake form password for this week:</p><h2 style="font-family:monospace;letter-spacing:2px;color:#1E293B;">${plain}</h2><p style="color:#64748B;font-size:13px;">This password expires in 7 days and was automatically rotated. Do not share this email.</p>`,
+      html: `<div style="font-family:sans-serif;max-width:480px;margin:40px auto;padding:32px;background:#fff;border:1px solid #E2E8F0;border-radius:12px">
+        <div style="font-size:18px;font-weight:700;color:#0F172A;margin-bottom:16px">Weekly Intake Password</div>
+        <p style="color:#64748B;font-size:14px;margin-bottom:20px">Your intake form password has been automatically rotated. Share this with customers who need access this week.</p>
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:20px;text-align:center;margin-bottom:20px">
+          <div style="font-family:monospace;font-size:24px;font-weight:700;color:#1E40AF;letter-spacing:2px">${plain}</div>
+        </div>
+        <p style="color:#94A3B8;font-size:12px;margin:0">Expires in 7 days. Do not forward this email.</p>
+      </div>`,
     });
+    console.log(`✓ Weekly password emailed to ${adminEmail}`);
   } catch (err) {
-    console.error('Email send failed:', err.message);
+    console.error('Password email failed:', err.message);
   }
 }
 
