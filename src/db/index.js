@@ -69,6 +69,32 @@ async function initSchema() {
       expires_at TIMESTAMPTZ NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS invoices (
+      id SERIAL PRIMARY KEY,
+      job_id INTEGER REFERENCES jobs(id),
+      customer_name VARCHAR(150),
+      customer_email VARCHAR(150),
+      amount DECIMAL(10,2) NOT NULL,
+      line_items JSONB DEFAULT '[]',
+      notes TEXT,
+      status VARCHAR(30) NOT NULL DEFAULT 'sent' CHECK (status IN ('sent','paid','void')),
+      sent_by INTEGER REFERENCES users(id),
+      sent_at TIMESTAMPTZ DEFAULT NOW(),
+      paid_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  // Schema migrations — run idempotently
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS invoice_status VARCHAR(30) DEFAULT NULL
+      CHECK (invoice_status IN ('pending_review','sent','paid','void') OR invoice_status IS NULL);
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS invoice_amount DECIMAL(10,2);
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS invoice_email VARCHAR(150);
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS invoice_sent_at TIMESTAMPTZ;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS invoice_id INTEGER REFERENCES invoices(id);
   `);
 
   // Seed owner if no users exist

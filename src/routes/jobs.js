@@ -139,8 +139,9 @@ router.patch('/:id/status', requireAuth, async (req, res) => {
   if (!valid.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
   try {
+    const invoiceClause = status === 'completed' ? `, invoice_status = 'pending_review'` : '';
     const { rows } = await pool.query(
-      `UPDATE jobs SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      `UPDATE jobs SET status = $1${invoiceClause}, updated_at = NOW() WHERE id = $2 RETURNING *`,
       [status, req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Job not found' });
@@ -178,11 +179,85 @@ router.post('/:id/checklist', requireAuth, async (req, res) => {
 router.post('/:id/complete', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `UPDATE jobs SET status = 'completed', updated_at = NOW() WHERE id = $1 RETURNING *`,
+      `UPDATE jobs SET status = 'completed', invoice_status = 'pending_review', updated_at = NOW() WHERE id = $1 RETURNING *`,
       [req.params.id]
     );
+    if (!rows[0]) return res.status(404).json({ error: 'Job not found' });
+
+    await pool.query(
+      `INSERT INTO activity_log (type, message, job_id, user_id) VALUES ($1,$2,$3,$4)`,
+      ['completed', `${rows[0].title} marked complete — awaiting invoice review`, rows[0].id, req.user.id]
+    );
+
     res.json(rows[0]);
   } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /jobs/:id/invoice — send invoice
+router.post('/:id/invoice', requireAuth, requireRole('owner', 'admin'), async (req, res) => {
+  const { customer_email, amount, line_items, notes } = req.body;
+  if (!customer_email || !amount) return res.status(400).json({ error: 'customer_email and amount required' });
+
+  try {
+    const { rows: jobRows } = await pool.query('SELECT * FROM jobs WHERE id = $1', [req.params.id]);
+    if (!jobRows[0]) return res.status(404).json({ error: 'Job not found' });
+    if (jobRows[0].status !== 'completed') return res.status(400).json({ error: 'Job must be completed before invoicing' });
+
+    const job = jobRows[0];
+
+    // Create invoice record
+    const { rows: invRows } = await pool.query(
+      `INSERT INTO invoices (job_id, customer_name, customer_email, amount, line_items, notes, sent_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [job.id, job.customer_name, customer_email, amount, JSON.stringify(line_items || []), notes || '', req.user.id]
+    );
+
+    // Update job
+    const { rows: updatedJob } = await pool.query(
+      `UPDATE jobs SET invoice_status = 'sent', invoice_amount = $1, invoice_email = $2,
+       invoice_sent_at = NOW(), invoice_id = $3, updated_at = NOW()
+       WHERE id = $4 RETURNING *`,
+      [amount, customer_email, invRows[0].id, job.id]
+    );
+
+    await pool.query(
+      `INSERT INTO activity_log (type, message, job_id, user_id) VALUES ($1,$2,$3,$4)`,
+      ['invoice_sent', `Invoice of $${parseFloat(amount).toFixed(2)} sent to ${customer_email} for ${job.title}`, job.id, req.user.id]
+    );
+
+    res.json({ job: updatedJob[0], invoice: invRows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// PATCH /jobs/:id/invoice-status — mark paid or void
+router.patch('/:id/invoice-status', requireAuth, requireRole('owner', 'admin'), async (req, res) => {
+  const { status } = req.body;
+  if (!['paid', 'void'].includes(status)) return res.status(400).json({ error: 'Invalid invoice status' });
+
+  try {
+    // Update invoice record
+    const { rows: jobRows } = await pool.query('SELECT invoice_id FROM jobs WHERE id = $1', [req.params.id]);
+    if (jobRows[0]?.invoice_id) {
+      await pool.query(
+        `UPDATE invoices SET status = $1 ${status === 'paid' ? ', paid_at = NOW()' : ''} WHERE id = $2`,
+        [status, jobRows[0].invoice_id]
+      );
+    }
+
+    const { rows } = await pool.query(
+      `UPDATE jobs SET invoice_status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [status, req.params.id]
+    );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Server error' });
   }
 });

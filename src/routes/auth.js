@@ -29,6 +29,8 @@ router.post('/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ message: 'Invalid email or password' });
 
+    if (user.active === false) return res.status(403).json({ message: 'Account has been deactivated. Contact your administrator.' });
+
     const access_token = signAccess(user);
     const refresh_token = signRefresh();
     const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
