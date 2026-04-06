@@ -16,6 +16,10 @@ router.get('/', requireAuth, async (req, res) => {
     if (tech_id) { params.push(tech_id); conditions.push(`tech_id = $${params.length}`); }
     if (status) { params.push(status); conditions.push(`status = $${params.length}`); }
     if (date) { params.push(date); conditions.push(`DATE(scheduled_date) = $${params.length}`); }
+    if (req.query.date_start && req.query.date_end) {
+      params.push(req.query.date_start); conditions.push(`DATE(scheduled_date) >= $${params.length}`);
+      params.push(req.query.date_end);   conditions.push(`DATE(scheduled_date) <= $${params.length}`);
+    }
     if (search) {
       params.push(`%${search}%`);
       conditions.push(`(title ILIKE $${params.length} OR customer_name ILIKE $${params.length})`);
