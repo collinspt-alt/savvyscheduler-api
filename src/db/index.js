@@ -86,6 +86,58 @@ async function initSchema() {
     );
   `);
 
+  // New tables
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS recurring_jobs (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(200) NOT NULL,
+      service_type VARCHAR(100),
+      customer_id INTEGER REFERENCES customers(id),
+      customer_name VARCHAR(150) NOT NULL,
+      tech_id INTEGER REFERENCES users(id),
+      tech_name VARCHAR(100),
+      address TEXT,
+      frequency VARCHAR(20) NOT NULL CHECK (frequency IN ('weekly','biweekly','monthly','custom')),
+      day_of_week INTEGER,
+      day_of_month INTEGER,
+      interval_days INTEGER,
+      scheduled_time VARCHAR(20),
+      estimated_duration INTEGER DEFAULT 90,
+      notes TEXT,
+      active BOOLEAN DEFAULT TRUE,
+      last_generated DATE,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS intake_submissions (
+      id SERIAL PRIMARY KEY,
+      customer_name VARCHAR(150) NOT NULL,
+      customer_email VARCHAR(150) NOT NULL,
+      customer_phone VARCHAR(30),
+      address TEXT NOT NULL,
+      service_type VARCHAR(100) NOT NULL,
+      preferred_date DATE,
+      preferred_time VARCHAR(50),
+      frequency VARCHAR(20) DEFAULT 'once' CHECK (frequency IN ('once','weekly','biweekly','monthly')),
+      notes TEXT,
+      status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+      reviewed_by INTEGER REFERENCES users(id),
+      reviewed_at TIMESTAMPTZ,
+      job_id INTEGER REFERENCES jobs(id),
+      ip_hash VARCHAR(64),
+      fingerprint VARCHAR(64),
+      submitted_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS intake_passwords (
+      id SERIAL PRIMARY KEY,
+      password_hash VARCHAR(255) NOT NULL,
+      plain_hint VARCHAR(20) NOT NULL,
+      active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
   // Schema migrations — run idempotently
   await pool.query(`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE;
@@ -95,6 +147,8 @@ async function initSchema() {
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS invoice_email VARCHAR(150);
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS invoice_sent_at TIMESTAMPTZ;
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS invoice_id INTEGER REFERENCES invoices(id);
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS recurring_job_id INTEGER;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE;
   `);
 
   // Seed owner if no users exist
