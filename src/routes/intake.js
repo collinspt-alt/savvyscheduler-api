@@ -29,9 +29,9 @@ function hashIp(ip) {
 }
 
 function fingerprint(req) {
-  const ua = req.headers['user-agent'] || '';
-  const ip = req.ip || req.headers['x-forwarded-for'] || '';
-  return crypto.createHash('sha256').update(ip + ua).digest('hex').slice(0, 32);
+  // Use only User-Agent — IP is unreliable behind Railway's proxy layer
+  const ua = req.headers['user-agent'] || 'unknown';
+  return crypto.createHash('sha256').update(ua + (process.env.IP_SALT || 'savvy_salt_2026')).digest('hex').slice(0, 32);
 }
 
 function sanitize(str, maxLen = 300) {
