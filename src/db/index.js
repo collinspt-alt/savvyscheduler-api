@@ -151,6 +151,7 @@ async function initSchema() {
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE;
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS travel_time INTEGER DEFAULT 15;
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS needs_scheduling BOOLEAN DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences JSONB DEFAULT '{}';
   `);
 
   // Seed owner if no users exist

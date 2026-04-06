@@ -287,12 +287,21 @@ router.get('/day-summary', requireAuth, async (req, res) => {
       return sum + dur;
     }, 0);
 
-    const DAILY_CAP = 480; // 8 hours
+    // Factor in user's lunch break preference
+    const { rows: userRows } = await pool.query(
+      'SELECT preferences FROM users WHERE id = $1', [req.user.id]
+    );
+    const prefs = userRows[0]?.preferences || {};
+    const lunchMins = parseInt(prefs.lunch_duration ?? 30);
+    const DAILY_CAP = 480 - lunchMins; // 8hrs minus lunch
+
     res.json({
       date,
       jobs: rows,
       total_blocked_mins: totalBlockedMins,
       daily_cap_mins: DAILY_CAP,
+      lunch_start: prefs.lunch_start || null,
+      lunch_duration: lunchMins,
       utilization_pct: Math.round((totalBlockedMins / DAILY_CAP) * 100),
       at_capacity: totalBlockedMins >= DAILY_CAP,
       needs_scheduling_count: rows.filter(j => j.needs_scheduling).length,

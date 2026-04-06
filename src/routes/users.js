@@ -112,4 +112,36 @@ router.patch('/:id/password', requireAuth, requireRole('owner', 'admin'), async 
   }
 });
 
+// PATCH /users/me/preferences — save lunch break and other personal prefs
+router.patch('/me/preferences', requireAuth, async (req, res) => {
+  const allowed = ['lunch_start', 'lunch_duration', 'day_start', 'day_end'];
+  const update = {};
+  allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
+  if (!Object.keys(update).length) return res.status(400).json({ error: 'Nothing to update' });
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE users SET preferences = preferences || $1::jsonb WHERE id = $2
+       RETURNING id, name, email, role, preferences`,
+      [JSON.stringify(update), req.user.id]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /users/me/preferences
+router.get('/me/preferences', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT preferences FROM users WHERE id = $1', [req.user.id]
+    );
+    res.json(rows[0]?.preferences || {});
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 module.exports = router;
