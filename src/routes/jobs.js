@@ -93,6 +93,56 @@ router.get('/route', requireAuth, async (req, res) => {
   }
 });
 
+// GET /jobs/day-summary?tech_id=&date= — workload summary for a tech on a date
+router.get('/day-summary', requireAuth, async (req, res) => {
+  const { tech_id, date } = req.query;
+  if (!date) return res.status(400).json({ error: 'date required' });
+
+  // Techs can only see their own summary
+  const targetTechId = req.user.role === 'tech' ? req.user.id : tech_id;
+
+  try {
+    const conditions = [`DATE(scheduled_date) = $1`, `status != 'cancelled'`];
+    const params = [date];
+    if (targetTechId) { params.push(targetTechId); conditions.push(`tech_id = $${params.length}`); }
+
+    const { rows } = await pool.query(
+      `SELECT id, title, scheduled_time, estimated_duration, travel_time, status, needs_scheduling
+       FROM jobs WHERE ${conditions.join(' AND ')}
+       ORDER BY scheduled_time ASC`,
+      params
+    );
+
+    const totalBlockedMins = rows.reduce((sum, j) => {
+      const dur = (j.estimated_duration || 90) + 2 * (j.travel_time ?? 15);
+      return sum + dur;
+    }, 0);
+
+    // Factor in user's lunch break preference
+    const { rows: userRows } = await pool.query(
+      'SELECT preferences FROM users WHERE id = $1', [req.user.id]
+    );
+    const prefs = userRows[0]?.preferences || {};
+    const lunchMins = parseInt(prefs.lunch_duration ?? 30);
+    const DAILY_CAP = 480 - lunchMins; // 8hrs minus lunch
+
+    res.json({
+      date,
+      jobs: rows,
+      total_blocked_mins: totalBlockedMins,
+      daily_cap_mins: DAILY_CAP,
+      lunch_start: prefs.lunch_start || null,
+      lunch_duration: lunchMins,
+      utilization_pct: Math.round((totalBlockedMins / DAILY_CAP) * 100),
+      at_capacity: totalBlockedMins >= DAILY_CAP,
+      needs_scheduling_count: rows.filter(j => j.needs_scheduling).length,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /jobs/:id
 router.get('/:id', requireAuth, async (req, res) => {
   try {
@@ -262,54 +312,6 @@ router.patch('/:id/invoice-status', requireAuth, requireRole('owner', 'admin'), 
   }
 });
 
-// GET /jobs/day-summary?tech_id=&date= — workload summary for a tech on a date
-router.get('/day-summary', requireAuth, async (req, res) => {
-  const { tech_id, date } = req.query;
-  if (!date) return res.status(400).json({ error: 'date required' });
 
-  // Techs can only see their own summary
-  const targetTechId = req.user.role === 'tech' ? req.user.id : tech_id;
-
-  try {
-    const conditions = [`DATE(scheduled_date) = $1`, `status != 'cancelled'`];
-    const params = [date];
-    if (targetTechId) { params.push(targetTechId); conditions.push(`tech_id = $${params.length}`); }
-
-    const { rows } = await pool.query(
-      `SELECT id, title, scheduled_time, estimated_duration, travel_time, status, needs_scheduling
-       FROM jobs WHERE ${conditions.join(' AND ')}
-       ORDER BY scheduled_time ASC`,
-      params
-    );
-
-    const totalBlockedMins = rows.reduce((sum, j) => {
-      const dur = (j.estimated_duration || 90) + 2 * (j.travel_time ?? 15);
-      return sum + dur;
-    }, 0);
-
-    // Factor in user's lunch break preference
-    const { rows: userRows } = await pool.query(
-      'SELECT preferences FROM users WHERE id = $1', [req.user.id]
-    );
-    const prefs = userRows[0]?.preferences || {};
-    const lunchMins = parseInt(prefs.lunch_duration ?? 30);
-    const DAILY_CAP = 480 - lunchMins; // 8hrs minus lunch
-
-    res.json({
-      date,
-      jobs: rows,
-      total_blocked_mins: totalBlockedMins,
-      daily_cap_mins: DAILY_CAP,
-      lunch_start: prefs.lunch_start || null,
-      lunch_duration: lunchMins,
-      utilization_pct: Math.round((totalBlockedMins / DAILY_CAP) * 100),
-      at_capacity: totalBlockedMins >= DAILY_CAP,
-      needs_scheduling_count: rows.filter(j => j.needs_scheduling).length,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
 
 module.exports = router;
