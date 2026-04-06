@@ -19,7 +19,7 @@ router.get('/metrics', requireAuth, requireRole('owner', 'admin'), async (req, r
   const prevEndStr   = prevEnd.toISOString().split('T')[0];
 
   try {
-    const [totalJobs, completed, cancelled, inProgress, prevCompleted, byTech, byService] = await Promise.all([
+    const [totalJobs, completed, cancelled, inProgress, prevCompleted, byTech, byService, needsScheduling] = await Promise.all([
       pool.query(`SELECT COUNT(*) FROM jobs WHERE DATE(scheduled_date) BETWEEN $1 AND $2`, [start, end]),
       pool.query(`SELECT COUNT(*) FROM jobs WHERE DATE(scheduled_date) BETWEEN $1 AND $2 AND status='completed'`, [start, end]),
       pool.query(`SELECT COUNT(*) FROM jobs WHERE DATE(scheduled_date) BETWEEN $1 AND $2 AND status='cancelled'`, [start, end]),
@@ -31,6 +31,7 @@ router.get('/metrics', requireAuth, requireRole('owner', 'admin'), async (req, r
       pool.query(`SELECT service_type, COUNT(*) as count
                   FROM jobs WHERE DATE(scheduled_date) BETWEEN $1 AND $2 AND service_type IS NOT NULL
                   GROUP BY service_type ORDER BY count DESC LIMIT 6`, [start, end]),
+      pool.query(`SELECT COUNT(*) FROM jobs WHERE needs_scheduling = TRUE AND status = 'scheduled'`),
     ]);
 
     const completedNow  = parseInt(completed.rows[0].count);
@@ -54,6 +55,7 @@ router.get('/metrics', requireAuth, requireRole('owner', 'admin'), async (req, r
       revenue_today:    completedNow * 237,
       by_tech:          byTech.rows,
       by_service:       byService.rows,
+      needs_scheduling: parseInt(needsScheduling.rows[0].count),
       deltas: {
         completed_today: completedDelta,
         revenue: completedDelta,

@@ -149,6 +149,8 @@ async function initSchema() {
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS invoice_id INTEGER REFERENCES invoices(id);
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS recurring_job_id INTEGER;
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS travel_time INTEGER DEFAULT 15;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS needs_scheduling BOOLEAN DEFAULT FALSE;
   `);
 
   // Seed owner if no users exist

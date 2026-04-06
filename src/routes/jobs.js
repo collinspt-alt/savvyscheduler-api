@@ -112,12 +112,12 @@ router.get('/:id', requireAuth, async (req, res) => {
 
 // POST /jobs
 router.post('/', requireAuth, requireRole('owner', 'admin'), async (req, res) => {
-  const { title, service_type, customer_name, tech_id, tech_name, address, scheduled_date, scheduled_time, estimated_duration, notes } = req.body;
+  const { title, service_type, customer_name, tech_id, tech_name, address, scheduled_date, scheduled_time, estimated_duration, notes, travel_time } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO jobs (title, service_type, customer_name, tech_id, tech_name, address, scheduled_date, scheduled_time, estimated_duration, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [title, service_type, customer_name, tech_id, tech_name, address, scheduled_date, scheduled_time, estimated_duration || 90, notes]
+      `INSERT INTO jobs (title, service_type, customer_name, tech_id, tech_name, address, scheduled_date, scheduled_time, estimated_duration, notes, travel_time)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [title, service_type, customer_name, tech_id, tech_name, address, scheduled_date, scheduled_time, estimated_duration || 90, notes, travel_time ?? 15]
     );
 
     await pool.query(
@@ -256,6 +256,47 @@ router.patch('/:id/invoice-status', requireAuth, requireRole('owner', 'admin'), 
     );
 
     res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /jobs/day-summary?tech_id=&date= — workload summary for a tech on a date
+router.get('/day-summary', requireAuth, async (req, res) => {
+  const { tech_id, date } = req.query;
+  if (!date) return res.status(400).json({ error: 'date required' });
+
+  // Techs can only see their own summary
+  const targetTechId = req.user.role === 'tech' ? req.user.id : tech_id;
+
+  try {
+    const conditions = [`DATE(scheduled_date) = $1`, `status != 'cancelled'`];
+    const params = [date];
+    if (targetTechId) { params.push(targetTechId); conditions.push(`tech_id = $${params.length}`); }
+
+    const { rows } = await pool.query(
+      `SELECT id, title, scheduled_time, estimated_duration, travel_time, status, needs_scheduling
+       FROM jobs WHERE ${conditions.join(' AND ')}
+       ORDER BY scheduled_time ASC`,
+      params
+    );
+
+    const totalBlockedMins = rows.reduce((sum, j) => {
+      const dur = (j.estimated_duration || 90) + 2 * (j.travel_time ?? 15);
+      return sum + dur;
+    }, 0);
+
+    const DAILY_CAP = 480; // 8 hours
+    res.json({
+      date,
+      jobs: rows,
+      total_blocked_mins: totalBlockedMins,
+      daily_cap_mins: DAILY_CAP,
+      utilization_pct: Math.round((totalBlockedMins / DAILY_CAP) * 100),
+      at_capacity: totalBlockedMins >= DAILY_CAP,
+      needs_scheduling_count: rows.filter(j => j.needs_scheduling).length,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });

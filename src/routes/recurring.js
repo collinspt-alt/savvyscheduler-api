@@ -136,17 +136,42 @@ async function generateRecurringJobs() {
       );
       if (existing.length) continue;
 
+      // Check tech capacity for this date before inserting
+      let needsScheduling = false;
+      if (tmpl.tech_id) {
+        const { rows: dayJobs } = await pool.query(
+          `SELECT estimated_duration, travel_time FROM jobs
+           WHERE tech_id = $1 AND DATE(scheduled_date) = $2 AND status != 'cancelled'`,
+          [tmpl.tech_id, dateStr]
+        );
+        const DAILY_CAP = 480;
+        const alreadyBlocked = dayJobs.reduce((sum, j) => {
+          return sum + (j.estimated_duration || 90) + 2 * (j.travel_time ?? 15);
+        }, 0);
+        const thisJobBlock = (tmpl.estimated_duration || 90) + 2 * 15;
+        if (alreadyBlocked + thisJobBlock > DAILY_CAP) {
+          needsScheduling = true;
+        }
+      }
+
       // Create the job
       await pool.query(
         `INSERT INTO jobs
           (title, service_type, customer_name, tech_id, tech_name, address,
-           scheduled_date, scheduled_time, estimated_duration, notes,
-           recurring_job_id, is_recurring, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,TRUE,'scheduled')`,
+           scheduled_date, scheduled_time, estimated_duration, travel_time, notes,
+           recurring_job_id, is_recurring, status, needs_scheduling)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,'scheduled',$13)`,
         [tmpl.title, tmpl.service_type, tmpl.customer_name, tmpl.tech_id, tmpl.tech_name,
          tmpl.address, `${dateStr}T00:00:00`, tmpl.scheduled_time,
-         tmpl.estimated_duration, tmpl.notes, tmpl.id]
+         tmpl.estimated_duration, 15, tmpl.notes, tmpl.id, needsScheduling]
       );
+
+      if (needsScheduling) {
+        await pool.query(
+          `INSERT INTO activity_log (type, message) VALUES ($1,$2)`,
+          ['needs_scheduling', `Recurring job "${tmpl.title}" for ${tmpl.customer_name} on ${dateStr} flagged — tech at capacity`]
+        );
+      }
 
       generated++;
     }
